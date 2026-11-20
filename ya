@@ -1,0 +1,615 @@
+# **Лабораторная работа №9 — Visual Studio 2026 + C# + Apache Kafka**
+
+Распишу именно под **Visual Studio 2026**, чтобы ты мог открыть IDE, создать проект, добавить файлы, вставить код и запустить всё через кнопки Visual Studio.
+
+Делаем ваш вариант: **UserService2 — сервис управления пользователями**.
+
+По методичке нужны:
+
+- Producer: `user.registered`.
+- Consumer: `order.created`.
+- Kafka-сервер: `10.9.2.80:9092`.
+- Формат сообщений: JSON.
+- Сидер для тестирования.
+
+## **Шаг 1. Создаём проект в Visual Studio 2026**
+
+[Creating a Background Service using IHostedService in C# | by Hilal Yazbek | Medium](https://images.openai.com/static-rsc-4/tUjmULhnma1X_oPuaqvg9A8roANGmpibI6mZiniEbqshNNH6uTzByvieIMbszK979YJD0qOZcmvUP16E-wcJhp8SxWXq4mBXjeNAFD2oHlo8lVfMQ86QGRKbuSwHBnIQp8aKo3ah1AMM7eQMU5HDe7VDcYZO2u_VZ58ERU9pcfs?purpose=inline)
+
+[medium.com](https://medium.com/%40hilalyazbek/creating-a-background-service-using-ihostedservice-in-c-2b9664dcd21c?utm_source=chatgpt.com)
+
+1. Открой Visual Studio 2026.
+2. Нажми **Create a new project**.
+3. В поиске шаблонов введи `Worker Service`.
+4. Выбери шаблон **Worker Service** на C#.
+5. Нажми Next.
+
+Заполни:
+
+| Поле          | Значение       |
+| ------------- | -------------- |
+| Project name  | `UserService2` |
+| Location      | Любая папка    |
+| Solution name | `UserService2` |
+
+6. Нажми Next.
+7. Выбери установленную версию .NET (желательно .NET 10, если доступна).
+8. Нажми Create.
+
+[Creating Worker Service + Entity Framework Core in .NET](https://images.openai.com/static-rsc-4/Zhco1med2N4zQa7gOlk8NcwJtPVN_DIEneQkinlDnNRCPv-i1I-jNZtY5XkAIqjsifKyRcG7Nihgqi6zSs6uYNMxWP9DKq509KdbloUi-v8hnFhk7Nqy1LfUVHwbET9IrVdgTGBTfsgLg6lNFBp9yzteCZoEn-A20aCJCOgeMkQ?purpose=inline)
+
+[ghidyon.hashnode.dev](https://ghidyon.hashnode.dev/creating-worker-service-entity-framework-core-in-net?utm_source=chatgpt.com)
+
+## **Шаг 2. Устанавливаем Confluent.Kafka**
+
+В Visual Studio:
+
+1. В правой части найди **Solution Explorer**.
+2. Нажми правой кнопкой на проект `UserService2`.
+3. Выбери `Manage NuGet Packages`.
+4. Перейди на вкладку `Browse`.
+5. Введи `Confluent.Kafka`.
+6. Выбери пакет `Confluent.Kafka`.
+7. Нажми Install.
+8. Подтверди установку.
+
+[Kafka Producer & Consumer with .Net Core 8 Minimal API | by Umair Rasheed | Medium](https://images.openai.com/static-rsc-4/YPU-sbKLRP-0r9M_QfUlvf_hocOp1P5fYbcL4KkFA9kmJN6aVyzTIWOCQ7ALiOrLgW6CXecrbM0PqZSPYOo21kW9g_E9ScU63vSB5i93x1JJuFbLlUxMPfLCatN54waGBuJ2TPueIShPGbTrDSTtq2Q1GsReFd3nAohNRsJ14Do?purpose=inline)
+
+[medium.com](https://medium.com/%40umairg404/kafka-producer-consumer-with-net-core-8-minimal-api-c5637628cf01?utm_source=chatgpt.com)
+
+После установки в Dependencies появится пакет Confluent.Kafka.
+
+## **Шаг 3. Создаём папки**
+
+В Solution Explorer:
+
+1. Правой кнопкой по проекту.
+2. Add → New Folder.
+3. Создай следующие папки:
+
+```
+UserService2
+│
+├── Kafka
+├── Models
+└── Seed
+```
+
+Теперь создадим файлы.
+
+Для создания каждого файла:
+
+- Правой кнопкой на нужную папку.
+- Add → Class.
+- Введи название класса.
+- Нажми Add.
+
+## **Шаг 4. Добавляем модель User**
+
+Открой папку `Models`.
+
+Создай класс `User.cs`.
+
+Полностью замени код:
+
+```
+
+namespace UserService2.Models;
+
+public class User
+{
+    public int Id { get; set; }
+
+    public string Name { get; set; } = "";
+
+    public string Email { get; set; } = "";
+}
+
+```
+
+## **Шаг 5. Создаём KafkaProducer**
+
+В папке `Kafka` создай класс `KafkaProducer.cs`.
+
+Вставь:
+
+```
+
+using Confluent.Kafka;
+using System.Text.Json;
+using UserService2.Models;
+
+namespace UserService2.Kafka;
+
+public class KafkaProducer : IDisposable
+{
+    private readonly IProducer<string, string> _producer;
+
+    public KafkaProducer()
+    {
+        var config = new ProducerConfig
+        {
+            BootstrapServers = "10.9.2.80:9092"
+        };
+
+        _producer = new ProducerBuilder<string, string>(
+            config
+        ).Build();
+    }
+
+    public async Task RegisterUser(User user)
+    {
+        string json = JsonSerializer.Serialize(user);
+
+        var result = await _producer.ProduceAsync(
+            "user.registered",
+            new Message<string, string>
+            {
+                Key = user.Id.ToString(),
+                Value = json
+            });
+
+        Console.WriteLine(
+            $"Отправлено в Kafka: {result.TopicPartitionOffset}"
+        );
+    }
+
+    public void Dispose()
+    {
+        _producer.Dispose();
+    }
+}
+
+```
+
+Это Producer. Он отправляет зарегистрированных пользователей в Kafka.
+
+## **Шаг 6. Создаём KafkaConsumer**
+
+В папке `Kafka` создай `KafkaConsumer.cs`.
+
+```
+
+using Confluent.Kafka;
+
+namespace UserService2.Kafka;
+
+public class KafkaConsumer : BackgroundService
+{
+    protected override Task ExecuteAsync(
+        CancellationToken stoppingToken)
+    {
+        return Task.Run(() =>
+        {
+            var config = new ConsumerConfig
+            {
+                BootstrapServers = "10.9.2.80:9092",
+                GroupId = "user-group-2",
+                AutoOffsetReset = AutoOffsetReset.Earliest,
+                EnableAutoCommit = false
+            };
+
+            using var consumer =
+                new ConsumerBuilder<string, string>(config).Build();
+
+            consumer.Subscribe("order.created");
+
+            Console.WriteLine(
+                "Ожидание сообщений из order.created..."
+            );
+
+            try
+            {
+                while (!stoppingToken.IsCancellationRequested)
+                {
+                    var result = consumer.Consume(stoppingToken);
+
+                    Console.WriteLine("Получен заказ:");
+                    Console.WriteLine(result.Message.Value);
+
+                    consumer.Commit(result);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                Console.WriteLine("Consumer остановлен");
+            }
+            finally
+            {
+                consumer.Close();
+            }
+        }, stoppingToken);
+    }
+}
+
+```
+
+Теперь Consumer будет ждать сообщения от сервиса заказов.
+
+## **Шаг 7. Создаём сидер**
+
+В папке `Seed` создай `UserSeeder.cs`.
+
+```
+
+using UserService2.Models;
+
+namespace UserService2.Seed;
+
+public static class UserSeeder
+{
+    public static List<User> GetUsers()
+    {
+        return new List<User>
+        {
+            new User
+            {
+                Id = 1,
+                Name = "Иван",
+                Email = "ivan@mail.ru"
+            },
+
+            new User
+            {
+                Id = 2,
+                Name = "Пётр",
+                Email = "petr@mail.ru"
+            },
+
+            new User
+            {
+                Id = 3,
+                Name = "Анна",
+                Email = "anna@mail.ru"
+            }
+        };
+    }
+}
+
+```
+
+Это наши тестовые пользователи.
+
+## **Шаг 8. Добавляем управление пользователями**
+
+Чтобы выполнить не только Kafka-часть, но и функциональные требования методички, добавим сервис регистрации, изменения и просмотра пользователей.
+
+В проекте создай папку `Services`, а в ней класс `UserManagementService.cs`.
+
+```
+
+using System.Collections.Concurrent;
+using UserService2.Kafka;
+using UserService2.Models;
+
+namespace UserService2.Services;
+
+public class UserManagementService
+{
+    private readonly ConcurrentDictionary<int, User> _users = new();
+    private readonly KafkaProducer _producer;
+
+    public UserManagementService(KafkaProducer producer)
+    {
+        _producer = producer;
+    }
+
+    public async Task RegisterUser(User user)
+    {
+        if (!_users.TryAdd(user.Id, user))
+            throw new InvalidOperationException("Пользователь уже существует");
+
+        await _producer.RegisterUser(user);
+    }
+
+    public bool UpdateUser(User user)
+    {
+        if (!_users.ContainsKey(user.Id))
+            return false;
+
+        _users[user.Id] = user;
+        return true;
+    }
+
+    public User? GetUser(int id)
+    {
+        _users.TryGetValue(id, out var user);
+        return user;
+    }
+
+    public List<User> GetAllUsers()
+    {
+        return _users.Values.ToList();
+    }
+}
+
+```
+
+Теперь имеются три операции:
+
+- `RegisterUser` — регистрация с отправкой события в Kafka.
+- `UpdateUser` — изменение пользователя.
+- `GetUser` — получение информации о пользователе.
+
+Данные здесь хранятся в памяти. Для полноценной базы данных в этой лабораторной пока можно не усложнять архитектуру.
+
+## **Шаг 9. Настраиваем Worker.cs**
+
+Открой уже созданный Visual Studio файл `Worker.cs`.
+
+Полностью замени его:
+
+```
+
+using UserService2.Seed;
+using UserService2.Services;
+
+namespace UserService2;
+
+public class Worker : BackgroundService
+{
+    private readonly UserManagementService _userService;
+
+    public Worker(UserManagementService userService)
+    {
+        _userService = userService;
+    }
+
+    protected override async Task ExecuteAsync(
+        CancellationToken stoppingToken)
+    {
+        Console.WriteLine("User Service 2 запущен");
+
+        var users = UserSeeder.GetUsers();
+
+        foreach (var user in users)
+        {
+            await _userService.RegisterUser(user);
+
+            Console.WriteLine(
+                $"Зарегистрирован: {user.Name}, {user.Email}"
+            );
+        }
+
+        Console.WriteLine("Все тестовые пользователи загружены");
+
+        await Task.Delay(
+            Timeout.Infinite,
+            stoppingToken
+        );
+    }
+}
+
+```
+
+Worker автоматически загрузит трёх пользователей при запуске и отправит три события в Kafka.
+
+## **Шаг 10. Настраиваем Program.cs**
+
+Это важный шаг: здесь мы регистрируем все наши сервисы.
+
+Открой `Program.cs` и замени содержимое:
+
+```
+
+using UserService2;
+using UserService2.Kafka;
+using UserService2.Services;
+
+var builder = Host.CreateApplicationBuilder(args);
+
+builder.Services.AddSingleton<KafkaProducer>();
+
+builder.Services.AddSingleton<UserManagementService>();
+
+builder.Services.AddHostedService<KafkaConsumer>();
+
+builder.Services.AddHostedService<Worker>();
+
+var host = builder.Build();
+
+host.Run();
+
+```
+
+Теперь Visual Studio будет запускать одновременно:
+
+1. `Worker` — загрузка пользователей и регистрация.
+2. `KafkaProducer` — отправка событий.
+3. `KafkaConsumer` — получение событий о заказах.
+
+## **Шаг 11. Проверяем проект в Visual Studio**
+
+Сначала нажми:
+
+**Build → Build Solution**
+
+Или клавиши:
+
+`Ctrl + Shift + B`
+
+Если ошибок нет, увидишь:
+
+Build succeeded
+
+Теперь проверь доступность Kafka.
+
+В Visual Studio открой:
+
+`View → Terminal`
+
+В терминале выполни:
+
+```
+Test-NetConnection 10.9.2.80 -Port 9092
+```
+
+Если `TcpTestSucceeded : True`, можно запускать приложение.
+
+Нажми:
+
+`Ctrl + F5`
+
+Это запуск без отладки.
+
+Ожидаемый вывод:
+
+```
+User Service 2 запущен
+
+Отправлено в Kafka: user.registered [0] @0
+Зарегистрирован: Иван, ivan@mail.ru
+
+Отправлено в Kafka: user.registered [0] @1
+Зарегистрирован: Пётр, petr@mail.ru
+
+Отправлено в Kafka: user.registered [0] @2
+Зарегистрирован: Анна, anna@mail.ru
+
+Все тестовые пользователи загружены
+
+Ожидание сообщений из order.created...
+```
+
+Номера offset и партиции приведены для примера.
+
+## **Шаг 12. Тестируем получение сообщений**
+
+Чтобы проверить Consumer, создадим второй проект, который будет имитировать сервис заказов.
+
+В Visual Studio:
+
+1. Правой кнопкой на Solution `UserService2`.
+2. Выбери Add → New Project.
+3. Выбери шаблон `Console App`.
+4. Назови проект `KafkaTestProducer2`.
+5. Нажми Create.
+6. Установи ему NuGet-пакет `Confluent.Kafka`.
+
+Открой `Program.cs` второго проекта и вставь:
+
+```
+
+using Confluent.Kafka;
+using System.Text.Json;
+
+var config = new ProducerConfig
+{
+    BootstrapServers = "10.9.2.80:9092"
+};
+
+using var producer =
+    new ProducerBuilder<string, string>(config).Build();
+
+var order = new
+{
+    OrderId = 101,
+    UserId = 1,
+    Product = "Ноутбук",
+    Price = 50000,
+    Status = "Created"
+};
+
+string json = JsonSerializer.Serialize(order);
+
+var result = await producer.ProduceAsync(
+    "order.created",
+    new Message<string, string>
+    {
+        Key = order.OrderId.ToString(),
+        Value = json
+    });
+
+Console.WriteLine(
+    $"Заказ отправлен: {result.TopicPartitionOffset}"
+);
+
+```
+
+### **Как запустить оба проекта одновременно**
+
+1. Запусти `UserService2` через Ctrl + F5.
+2. Не закрывай его.
+3. Открой второй терминал через View → Terminal.
+4. Выполни:
+
+```
+dotnet run --project KafkaTestProducer2
+```
+
+В первом проекте должен появиться результат:
+
+```
+Получен заказ:
+{"OrderId":101,"UserId":1,"Product":"Ноутбук","Price":50000,"Status":"Created"}
+```
+
+Consumer успешно получил сообщение
+
+Если Kafka сообщает, что топик не существует, попросите преподавателя проверить создание топиков `user.registered` и `order.created` на общем брокере. Если соединение есть, но Kafka выдаёт ошибку подключения к другому адресу, возможно, требуется проверить настройки advertised listeners сервера.
+
+## **Шаг 13. Итоговая структура Solution**
+
+В итоге в Visual Studio у вас должно получиться:
+
+**Solution 'UserService2'**
+
+&#x20;**UserService2**
+
+&#x20;Kafka
+
+KafkaProducer.cs
+
+KafkaConsumer.cs
+
+&#x20;Models
+
+User.cs
+
+&#x20;Seed
+
+UserSeeder.cs
+
+&#x20;Services
+
+UserManagementService.cs
+
+Program.cs
+
+Worker.cs
+
+&#x20;**KafkaTestProducer2**
+
+Program.cs
+
+## **Чек-лист перед сдачей**
+
+**Выполнение лабораторной**
+
+# **0/11**
+
+Создать Worker Service в Visual Studio 2026
+
+Установить Confluent.Kafka
+
+Создать модель User
+
+Реализовать регистрацию пользователей
+
+Реализовать изменение и просмотр пользователей
+
+Реализовать Producer с топиком user.registered
+
+Реализовать Consumer с топиком order.created
+
+Создать UserSeeder
+
+Проверить подключение к Kafka 10.9.2.80:9092
+
+Отправить тестовый заказ и проверить получение
+
+Сделать скриншоты работы приложения
+
+**Мой совет:** сначала добейся, чтобы проект собрался и подключился к Kafka. Не добавляй базу данных, Web API и другие технологии, пока не заработает базовый обмен сообщениями.
+
+И ещё: в этой реализации пользователи хранятся в оперативной памяти, а не в базе данных. Это учебный вариант для демонстрации функций User Service и Kafka.
